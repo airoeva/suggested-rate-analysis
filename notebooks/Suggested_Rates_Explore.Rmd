@@ -90,12 +90,12 @@ connect_pull_close <- function(tablename,
 }
 
 DB_PARAMS <- list(
-    "dbname" = "contractual_prd",
-    "user"  = "goldzoneingestion",
-    "pw"  = "E2K8nz0KsDjyJcmjrejYVM7e",
-    "host"   = "centralus-contractual-postgres-flex-db-prd-fpg.postgres.database.azure.com",
-    "port"  = 5432,
-    "schema" = "microfocals"
+    "dbname" = "",
+    "user"  = "",
+    "pw"  = "",
+    "host"   = "",
+    "port"  = ,
+    "schema" = ""
   )
 statement <- "with lastround as (
 select b.bid_id, max(b.round) as roundreporting

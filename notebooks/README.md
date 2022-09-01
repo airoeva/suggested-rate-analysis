@@ -29,14 +29,40 @@ This data set covers 174960 lanes with 564 unique bid_id. Every lane has a non-z
 
 - fRateSmasher is doing better in Reefer
 
-### To further explore this behavior, I looked for trends by:
+## Main Takeaways by Mode and Super Regions:
 
 ### Mode: 
-Main Takeaways:
 - fRateSmasher is more consistent in both win rates and awarding the starting rate guidance than fRateCaster
 - fRateSmasher awards the starting rate guidance in Reefer lanes more than Van lanes. This is opposite of fRateCaster
 
-By the numbers:
+### Origin Super Region:
+- fRateSmasher has award rates similar to fRateCaster in the South West and Pacific regions
+- fRateSmasher has a higher award rate than fRateCaster in the North East Region
+- The largest disparity in the percentage of awarded lanes that use the starting rate guidance between models is in the North Central, Pacific, and Midwest Regions.
+- The starting rate guidance was used at a higher rate under fRateCaster across all regions
+- When the starting rate guidance was not taken, the suggested rate was typically lower than the awarded rate, especially in fRateSmasher
+
+### Destination Super Region:
+- Award rate was fairly consistent across regions
+- fRateSmasher has a higher award rate than fRateCaster in the midwest 
+- The largest disparity between award rates is in the North Central Region (fRateCaster higher)
+- The percentage of lanes where the starting rate guidance becomes the award is fairly consistent, except the North East is slightly lower, and North Central region is higher.
+- The percentage of lanes where the starting rate guidance becomes the award is below the average for all regions of fRateSmasher 
+
+## Zooming in a Bit
+
+### Feature Significance:
+I used LASSO to determine which features from 'classification','origin_super_region', 'destination_super_region', 'miles', 'mode', and 'bid_volume' were predictors of whether an awarded lane used the suggested rate. Across all awards, in addition to partioning by model, all of the above features came back as predictors.
+
+I then ran a binary logistic regression model. From the coefficient estimates we can gather:
+- A classification as RePrice, MiniBid, or Outsource all increase likelihood of starting rate guidance being awarded
+- The North East, Pacific, South East, and South West origin super regions all decrease the liklihood of the starting rate guidance being awarded
+- The North East and South West destination super regions all decrease the likelihood of the starting rate guidance being awarded
+- Increasing miles increases the likelihood of starting rate guidance being awarded
+- Van mode increases the likelihood of starting rate guidance being awarded
+- Increase in bid volume decreases the likelihood of starting rate guidance being awarded
+
+### Mode: 
 - Overall, we were awarded 5.8% of Reefer lanes and 11.2% of Van lanes. 
     - In fRateCaster:
         - Awarded 3.5% of Reefer and 11.65% of Van
@@ -48,16 +74,9 @@ By the numbers:
     - In fRateSmasher awarded lanes:
         - Suggested was the award in 45% of Reefer lanes and 32% of Van lanes
 
+
 ### Origin Super Region:
-Main Takeaways:
-- fRateSmasher has award rates similar to fRateCaster in the South West and Pacific regions
-- fRateSmasher has a higher award rate than fRateCaster in the North East Region
-- The largest disparity in the percentage of awarded lanes that use the starting rate guidance between models is in the North Central, Pacific, and Midwest Regions.
-- The starting rate guidance was used at a higher rate under fRateCaster across all regions
-
-By the numbers:
-
-Overall, our award rates by origin super region were:
+- Overall, our award rates by origin super region were:
 
 | Origin Super Region | Overall | fRateCaster | fRateSmasher |
 | --------------------|---------|-------------|--------------|
@@ -68,7 +87,7 @@ Overall, our award rates by origin super region were:
 |South West|13.37%|13.5%|13.2%|
 |North East|13.88%|12.6%|15%|\
 
-Of the awarded lanes, the starting rate guidance became the awarded rates:
+- Of the awarded lanes, the starting rate guidance became the awarded rates:
 
 | Origin Super Region | Overall | fRateCaster | fRateSmasher |
 | --------------------|---------|-------------|--------------|
@@ -79,17 +98,10 @@ Of the awarded lanes, the starting rate guidance became the awarded rates:
 |South West|43.44%|45.5%|41.1%|
 |North East|41.1%|46.4%|36.9%|
 
+
+
 ### Destination Super Region:
-Main Takeaways:
-- Award rate was fairly consistent across regions
-- fRateSmasher has a higher award rate than fRateCaster in the midwest 
-- The largest disparity between award rates is in the North Central Region (fRateCaster higher)
-- The percentage of lanes where the starting rate guidance becomes the award is fairly consistent, except the North East is slightly lower, and North Central region is higher.
-- The percentage of lanes where the starting rate guidance becomes the award is below the average for all regions of fRateSmasher 
-
-By the numbers:
-
-Overall, our award rates by destination super region were:
+- Overall, our award rates by destination super region were:
 
 | Destination Super Region | Overall | fRateCaster | fRateSmasher |
 | --------------------|---------|-------------|--------------|
@@ -100,7 +112,7 @@ Overall, our award rates by destination super region were:
 |Midwest|11.5%|10.8%|12.4%|
 |North East|11.89%|12.3%|11.5%|
 
-Of the awarded lanes, the starting rate guidance became the awarded rates:
+- Of the awarded lanes, the starting rate guidance became the awarded rates:
 
 | Destination Super Region | Overall | fRateCaster | fRateSmasher |
 | --------------------|---------|-------------|--------------|
@@ -110,3 +122,10 @@ Of the awarded lanes, the starting rate guidance became the awarded rates:
 |North Central|57.87%|76.2%|26.1|
 |Midwest|48.09%|60.7%|34.7%|
 |North East|40.58%|45.5%|34.6%|
+
+
+
+## Future Work:
+- Bin by mileage
+- Look at multi round
+- Split mode and super regions by whether award was higher or lower
