@@ -34,12 +34,12 @@ library(tidyverse)
 
  
 connect_pull_close <- function(tablename, 
-                               dbname = "contractual_prd", 
-                               user = "goldzoneingestion",
-                               pw = "E2K8nz0KsDjyJcmjrejYVM7e", 
-                               port = 5432, 
-                               host = "centralus-contractual-postgres-flex-db-prd-fpg.postgres.database.azure.com",
-                               schema = NULL, 
+                               dbname = "", 
+                               user = "",
+                               pw = "", 
+                               port = , 
+                               host = "",
+                               schema = , 
                                statement = paste0("select * from ", tablename)) {
   if (!is.null(schema)) {
     options <- paste0("-c search_path=", schema)
