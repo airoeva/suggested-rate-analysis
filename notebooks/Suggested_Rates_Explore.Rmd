@@ -12,8 +12,9 @@ library(tidyverse)
   
   
 #Query lane bids joined to award info (only final round)
-#This query joins bid data to award data, limited to only the data from the final round. Currently set to pull all lanes with a customer submit date since 6/1/2022
-```{r Andrew_query, include = FALSE}
+#This query joins bid data to award data, limited to only the data from the final round. Currently set to pull all lanes with a customer submit date since 6/10/2022. I then partition at 7/20 so there are 40 days of caster and 43 days of smasher data
+```{r Andrew_query}
+#I added super regions
 #' postgres connect, pull, and disconnect from db
 #'
 #' @param tablename string tablename
@@ -33,11 +34,11 @@ library(tidyverse)
 
  
 connect_pull_close <- function(tablename, 
-                               dbname = "", 
-                               user = "",
-                               pw = "", 
-                               port = , 
-                               host = "",
+                               dbname = "contractual_prd", 
+                               user = "goldzoneingestion",
+                               pw = "E2K8nz0KsDjyJcmjrejYVM7e", 
+                               port = 5432, 
+                               host = "centralus-contractual-postgres-flex-db-prd-fpg.postgres.database.azure.com",
                                schema = NULL, 
                                statement = paste0("select * from ", tablename)) {
   if (!is.null(schema)) {
@@ -89,12 +90,12 @@ connect_pull_close <- function(tablename,
 }
 
 DB_PARAMS <- list(
-    "dbname" = "",
-    "user"  = "",
-    "pw"  = "",
-    "host"   = "",
-    "port"  = ,
-    "schema" = ""
+    "dbname" = "contractual_prd",
+    "user"  = "goldzoneingestion",
+    "pw"  = "E2K8nz0KsDjyJcmjrejYVM7e",
+    "host"   = "centralus-contractual-postgres-flex-db-prd-fpg.postgres.database.azure.com",
+    "port"  = 5432,
+    "schema" = "microfocals"
   )
 statement <- "with lastround as (
 select b.bid_id, max(b.round) as roundreporting
@@ -115,11 +116,14 @@ b.bid_id
 ,b.pricing_manager
 ,b.expect_award
 ,b.contract_id
+,b.fratecaster_run_date
 ,c.bid_effective_date
 ,c.bid_expiration_date
 ,c.classification
 ,n.lane_id
 ,n.bid_lane_id
+,n.origin_super_region
+,n.destination_super_region
 ,n.origin_hierarchy
 ,n.origin_city
 ,n.origin_state
@@ -158,7 +162,7 @@ left join microfocals.contracts as c on b.contract_id = c.contract_id
 join microfocals.lanes as n on b.bid_id = n.bid_id and l.roundreporting=n.\"round\"
 left join microfocals.awards as a on a.bid_id = b.bid_id
 left join microfocals.awarded_lanes as al on a.id = al.award_id_fk and n.bid_lane_id = al.bid_lane_id
-where b.customer_submit_date>='2022-06-01 00:00:00'
+where b.customer_submit_date>='2022-06-15 00:00:00'
 "
 
 df <- connect_pull_close(
@@ -222,9 +226,17 @@ df_joined <- df %>%
     suggest_versus_submit = as_factor(suggest_versus_submit),
     mode = as.factor(mode)
   )
+df_joined <- df_joined %>%
+  mutate(smasher = case_when(
+    fratecaster_run_date < '2022-07-20' ~ "fRateCaster",
+    fratecaster_run_date >= '2022-07-20' ~ "fRateSmasher")) %>%
+  filter(!mode %in% c("F","Flatbed"),
+         is_drop_trailer == FALSE,
+         origin_super_region != "Canada",
+         destination_super_region != "Canada")
 ```
 
-# Summary (as of 8/19):
+# Summary (as of 8/19): 6-1-2022 forward
 - 189354 [total_lanes] round 1 lanes with 565 [unique_bid_id] unique bid_id
 - all have starting_rate_guidance and submitted_RPM != 0
 - Of all these lanes, we were awarded 12.2% [award_percentage] of them
@@ -245,58 +257,259 @@ awarded_lanes <- df_joined %>% filter(awarded_lane == 1)
 suggest_award_won <- mean(awarded_lanes$suggest_is_award)
 ```
 
+108966 lanes over 323 bid id run before 7-20
+- 10.17% win rate
+- the rate submitted was the awarded rate 8.54% of the time
+- the rate suggested was the awarded rate 5.85% of the time
+- of the lanes we were awarded, the suggested rate was the award 57.5% of the time
 
-#Look at where suggested rates of single-shot data are used by mode
-```{r suggested_rates_taken_by_mode}
-#we seem to be worse at suggesting in flat_bed
+
+89280 lanes over 277 run on or after 7-20
+- 9.83% win rate
+- the rate submitted was the awarded rate 9.3% of the time
+- the rate suggested was the awarded rate 3.17% of the time
+- of the lanes we were awarded, the suggested rate was the award 32.26% of the time
+
+```{r compare pre_post_smasher}
+cast_lanes <- df_joined %>% filter(smasher == "fRateCaster")
+nrow(cast_lanes)
+length(unique(cast_lanes$bid_id))
+mean(cast_lanes$awarded_lane)
+mean(cast_lanes$submit_is_award)
+mean(cast_lanes$suggest_is_award)
+awarded__cast_lanes <- cast_lanes %>% filter(awarded_lane == 1)
+mean(awarded__cast_lanes$suggest_is_award)
+
+
+smash_lanes <- df_joined %>% filter(smasher == "fRateSmasher")
+nrow(smash_lanes)
+length(unique(smash_lanes$bid_id))
+mean(smash_lanes$awarded_lane)
+mean(smash_lanes$submit_is_award)
+mean(smash_lanes$suggest_is_award)
+awarded__smash_lanes <- smash_lanes %>% filter(awarded_lane == 1)
+mean(awarded__smash_lanes$suggest_is_award)
+```
+
+```{r suggested_becomes_award_BASIC}
+#Goal: Visualize Percentages described above
+#Lanes where suggest was award or not
 ggplot(df_joined %>% drop_na(suggest_is_award)) +
   geom_bar(aes(suggest_is_award)) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Suggested Rate == Awarded Rate", y = "Lanes", title = "Occurences of Suggested RPM Becoming Awarded RPM")
+
+#lanes where suggest was award or not split by smasher
+ggplot(df_joined %>% drop_na(suggest_is_award)) +
+  geom_bar(aes(suggest_is_award)) +
+  facet_wrap(~smasher) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Suggested Rate == Awarded Rate", y = "Lanes", title = "Occurences of Suggested RPM Becoming Awarded RPM")
+
+#lanes where suggest was award, just of lanes we won
+ggplot(df_joined %>% drop_na(suggest_is_award) %>% filter(awarded_lane==1))+
+  geom_bar(aes(suggest_is_award)) +
+  facet_wrap(~smasher) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Suggested Rate == Awarded Rate", y = "Awarded Lanes", title = "Occurences of Suggested RPM Becoming Awarded RPM", subtitle = "Of Awarded Lanes")
+
+ggplot(df_joined %>% drop_na(suggest_is_award) %>% filter(awarded_lane==1))+
+  geom_bar(aes(suggest_is_award, fill = smasher), position = "dodge") +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Suggested Rate == Awarded Rate", y = "Awarded Lanes", title = "Occurences of Suggested RPM Becoming Awarded RPM", subtitle = "Of Awarded Lanes", fill = "Model") +
+  theme_minimal()
+
+
+ggplot(df_joined %>% drop_na(suggest_is_award) %>% filter(awarded_lane==1) %>% group_by(smasher) %>% summarise(count = sum(awarded_lane), prop = mean(suggest_is_award)))+
+  geom_col(aes(x = smasher, y = count, fill = prop), position = "dodge") +
+  geom_text(aes(x = smasher, y = count - 1000, label = scales::percent(round(prop, 4))), color = "white", size = 5) +
+  scale_y_continuous(labels = scales::comma)  +
+  scale_fill_continuous(low = "dark red", high = "dark green") +
+  theme_minimal() +
+  labs(x = "Model", y = "Lane Count", fill = "Awarded Rate\nis Suggested\nRate", title = "Proportion of Awarded Lanes that Won with Suggested Rate")
+```
+
+
+#Look at where suggested rates of single-shot data are used by mode, super region
+```{r  mode}
+#Ok,  let's look at how we are awarded lanes by mode. Then we can see if suggested behavior is just following awarded behavior:
+ggplot(df_joined %>% drop_na(awarded_lane)) +
+  geom_bar(aes(as.factor(awarded_lane), fill = smasher), position = "dodge") +
   facet_wrap(~mode, scales = "free_y", labeller = labeller(mode = c("F" = "Flatbed", "R" = "Reefer", "V" = "Van")))+
   scale_y_continuous(labels = scales::comma) +
-  labs(x = "Suggested Rate == Awarded Rate", y = "Lanes", title = "Occurences of Suggested RPM Becoming Awarded RPM", subtitle = "Split by Mode")
-#The above plot was more challenging to look at based on count disparities, let's look at percentages:
+  labs(x = "Awarded Lane", y = "Lanes", title = "Lane Outcome by Mode")+
+  theme(legend.title = element_blank())  
+#fRatesmasher is winning more reefer and less van than caster
 
+#Let's look at the proportion of those awarded lanes by mode. i.e. what is our awarded lane rate by group?
+prop_won_by_mode <- df_joined %>% group_by(mode) %>% summarise(prop = mean(awarded_lane))
+
+ggplot(prop_won_by_mode) +
+  geom_col(aes(x= as.factor(mode), y =prop), position = "dodge") +
+  geom_text(aes(x = as.factor(mode), y = prop - 0.003, label = scales::percent(prop)), color = "white", size =5) +
+  labs(x = "Mode", y= "Awarded Lanes", title = "Awarded Lanes by Mode") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  scale_x_discrete(labels = c("Reefer", "Van"))+
+  theme(legend.title = element_blank())
+
+#Goal: The above plot was more challenging to look at based on count disparities, let's look at percentages where suggested rpm was the awarded rpm split by mode:
 prop_suggest_is_award_mode <- df_joined %>% group_by(mode) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
 
 ggplot(prop_suggest_is_award_mode) +
   geom_col(aes(x= mode, y =prop)) +
+  geom_text(aes(x = mode, y=prop + 0.0025, label = scales::percent(round(prop,4))), color = "black", size = 5)+
   labs(x = "Mode", y= "Percentage of Lanes", title = "Suggested_RPM becomes Awarded_RPM") +
   scale_y_continuous(labels = scales::percent) +
   theme_minimal() +
-  scale_x_discrete(labels = c("Flatbed", "Reefer", "Van"))
-#Ok, suggest is award 6.8% of time in reefer, 6.1% of time in can, and .57% of time in flatbed
+  scale_x_discrete(labels = c( "Reefer", "Van"))+
+  theme(legend.title = element_blank())
 
-#Ok, now let's look at how we are awarded lanes by mode:
+
+#Goal: Let's see if the behavior by mode varies between models
+
+prop_suggest_is_award_mode <- df_joined %>% group_by(mode, smasher) %>% summarise(prop = mean(awarded_lane, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= mode, y =prop, fill = smasher), position = "dodge") +
+  labs(x = "Mode", y= "Percentage of Lanes", title = "Award Rate") +
+  geom_text(aes(x= c(0.8, 1.2, 1.75, 2.2), y =prop + 0.0025, label = scales::percent(round(prop,4))) )+
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  scale_x_discrete(labels = c( "Reefer", "Van"))+
+  theme(legend.title = element_blank())
+
+prop_suggest_is_award_mode <- df_joined %>% filter(awarded_lane == 1) %>% group_by(mode) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= mode, y =prop), position = "dodge") +
+  labs(x = "Mode", y= "Percentage of Lanes", title = "Percentage of Awarded Lanes where Suggested_RPM is Awarded_RPM") +
+  geom_text(aes(x= mode, y =prop - 0.025, label = scales::percent(round(prop,4))), color = "white", size =5 )+
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  scale_x_discrete(labels = c( "Reefer", "Van"))+
+  theme(legend.title = element_blank())
+
+prop_suggest_is_award_mode <- df_joined %>% filter(awarded_lane == 1) %>% group_by(mode, smasher) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= mode, y =prop, fill = smasher), position = "dodge") +
+  labs(x = "Mode", y= "Percentage of Lanes", title = "Percentage of Awarded Lanes where Suggested_RPM is Awarded_RPM") +
+  geom_text(aes(x= c(0.8, 1.2, 1.78, 2.23), y =prop - 0.025, label = scales::percent(round(prop,4))) )+
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  scale_x_discrete(labels = c( "Reefer", "Van"))+
+  theme(legend.title = element_blank())
+
+```
+
+```{r origin_super_region}
+#Ok,  let's look at how we are awarded lanes across regions:
 ggplot(df_joined %>% drop_na(awarded_lane)) +
-  geom_bar(aes(awarded_lane)) +
-  facet_wrap(~mode, scales = "free_y", labeller = labeller(mode = c("F" = "Flatbed", "R" = "Reefer", "V" = "Van")))+
+  geom_bar(aes(as.factor(awarded_lane), fill = smasher), position = "dodge") +
+  facet_wrap(~origin_super_region, scales = "free_y")+
   scale_y_continuous(labels = scales::comma) +
-  labs(x = "Awarded Lane", y = "Lanes", title = "Lane Outcome by Mode")  
+  labs(x = "Awarded Lane", y = "Lanes", title = "Lane Outcome by Origin Super Region")+
+  theme(legend.title = element_blank())  
 
-#Let's look at the proportion of those awarded lanes by mode. i.e. what is our awarded lane rate by groupp?
-prop_won_by_mode <- df_joined %>% group_by(mode) %>% summarise(prop = mean(awarded_lane))
+#Let's look at the proportion of those awarded lanes. i.e. what is our awarded lane rate by group?
+prop_won_by_mode <- df_joined %>% group_by(origin_super_region) %>% summarise(prop = mean(awarded_lane))
 
 ggplot(prop_won_by_mode) +
-  geom_col(aes(x= as.factor(mode), y =prop)) +
-  labs(x = "Mode", y= "Awarded Lanes", title = "Awarded Lanes by Mode") +
+  geom_col(aes(x= reorder(origin_super_region,prop), y =prop), position = "dodge") +
+  geom_text(aes(x = reorder(origin_super_region,prop), y = prop - 0.003, label = scales::percent(prop)), color = "white", size =5) +
   scale_y_continuous(labels = scales::percent) +
   theme_minimal() +
-  scale_x_discrete(labels = c("Flatbed", "Reefer", "Van"))
+  theme(legend.title = element_blank()) +
+  labs(x = "Origin Super Region", y = "Award Rate", title = "Percentage of Lanes Awarded by Origin Super Region")
 
-#Ok, we are awarded the lane 9.9% of time in reefer, 12.8% of time in van, and 2.55% of time in flatbed
-```
+#How are those proportions different between models?
+prop_won_by_mode <- df_joined %>% group_by(origin_super_region, smasher) %>% summarise(prop = mean(awarded_lane))
 
-```{r percent_suggest_of_award_by_mode}
-#Calculate and plot the percentage of awarded lanes that won using the suggested rate, partitioned by mode.
-percent_suggest_of_award <- df_joined %>% filter(awarded_lane == 1) %>% group_by(mode) %>% summarise(prop_of_award = mean(suggest_is_award))
-
-ggplot(percent_suggest_of_award) +
-  geom_col(aes(x= as.factor(mode), y = prop_of_award))+
+ggplot(prop_won_by_mode) +
+  geom_col(aes(x= reorder(origin_super_region,prop), y =prop, fill = smasher), position = "dodge") +
   scale_y_continuous(labels = scales::percent) +
-  labs(x = "Mode", y = "Percentage of Awarded Lanes",  title = "Percentage of Awarded Lanes That Won With Suggested Rate")+
   theme_minimal() +
-  scale_x_discrete(labels = c("Flatbed", "Reefer", "Van"))
+  theme(legend.title = element_blank()) +
+  labs(x = "Origin Super Region", y = "Award Rate", title = "Percentage of Lanes Awarded by Origin Super Region")
+
+
+#Goal: Look at percentages where suggested rpm was the awarded rpm split by osr:
+prop_suggest_is_award_mode <- df_joined %>% filter(awarded_lane == 1) %>% group_by(origin_super_region) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= reorder(origin_super_region,prop), y =prop)) +
+  geom_text(aes(x = reorder(origin_super_region,prop), y=prop - 0.01, label = scales::percent(round(prop,4))), color = "white", size = 5)+
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(x = "Origin Super Region",y= "Percentage of Lanes", title = "Percentage of Awarded Lanes where the Suggested Rate Wins")
+
+#Let's divide by model
+prop_suggest_is_award_mode <- df_joined %>% filter(awarded_lane == 1) %>% group_by(origin_super_region, smasher) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= reorder(origin_super_region,prop), y =prop, fill = smasher), position="Dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(x = "Origin Super Region",y= "Percentage of Lanes", title = "Percentage of Awarded Lanes where the Suggested Rate Wins")
+
 ```
+
+```{r destination_super_region}
+#Ok,  let's look at how we are awarded lanes across regions:
+ggplot(df_joined %>% drop_na(awarded_lane)) +
+  geom_bar(aes(as.factor(awarded_lane), fill = smasher), position = "dodge") +
+  facet_wrap(~destination_super_region, scales = "free_y")+
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = "Awarded Lane", y = "Lanes", title = "Lane Outcome by Destination Super Region")+
+  theme(legend.title = element_blank())  
+
+#Let's look at the proportion of those awarded lanes. i.e. what is our awarded lane rate by group?
+prop_won_by_mode <- df_joined %>% group_by(destination_super_region) %>% summarise(prop = mean(awarded_lane))
+
+ggplot(prop_won_by_mode) +
+  geom_col(aes(x= reorder(destination_super_region,prop), y =prop), position = "dodge") +
+  geom_text(aes(x = reorder(destination_super_region,prop), y = prop - 0.003, label = scales::percent(prop)), color = "white", size =5) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  theme(legend.title = element_blank()) +
+  labs(x = "Destination Super Region", y = "Award Rate", title = "Percentage of Lanes Awarded by Destination Super Region")
+
+#How are those proportions different between models?
+prop_won_by_mode <- df_joined %>% group_by(destination_super_region, smasher) %>% summarise(prop = mean(awarded_lane))
+
+ggplot(prop_won_by_mode) +
+  geom_col(aes(x= reorder(destination_super_region,prop), y =prop, fill = smasher), position = "dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  theme(legend.title = element_blank()) +
+  labs(x = "Destination Super Region", y = "Award Rate", title = "Percentage of Lanes Awarded by Destination Super Region")
+
+
+#Goal: Look at percentages where suggested rpm was the awarded rpm split by osr:
+prop_suggest_is_award_mode <- df_joined %>% filter(awarded_lane == 1) %>% group_by(destination_super_region) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= reorder(destination_super_region,prop), y =prop)) +
+  geom_text(aes(x = reorder(destination_super_region,prop), y=prop - 0.01, label = scales::percent(round(prop,4))), color = "white", size = 5)+
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(x = "Destination Super Region",y= "Percentage of Lanes", title = "Percentage of Awarded Lanes where the Suggested Rate Wins")
+
+#Let's divide by model
+prop_suggest_is_award_mode <- df_joined %>% filter(awarded_lane == 1) %>% group_by(destination_super_region, smasher) %>% summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+
+ggplot(prop_suggest_is_award_mode) +
+  geom_col(aes(x= reorder(destination_super_region,prop), y =prop, fill = smasher), position="Dodge") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal() +
+  labs(x = "Destination Super Region",y= "Percentage of Lanes", title = "Percentage of Awarded Lanes where the Suggested Rate Wins") +
+  geom_hline(aes(yintercept =overall[1,] ))
+
+overall <- df_joined %>% filter(awarded_lane == 1) %>%summarise(prop = mean(suggest_is_award, na.rm=TRUE))
+```
+
+
 
 #Start of suggested rates & geography overview
 ```{r create_list_of_us_states}
@@ -312,7 +525,7 @@ avg <- stats[,1]
 ```{r origin_state_suggest_is_award}
 #Out of awarded lanes originating in the US, what percentage of awards used the suggested rate, partioned by origin state
 
-percent_suggest_of_award <- df_joined %>% filter(awarded_lane == 1, origin_state %in% list_of_us) %>% group_by(origin_state) %>% summarise(prop_of_award = mean(suggest_is_award), sum = n()) %>% arrange(sum)
+percent_suggest_of_award <- df_joined %>% filter(awarded_lane == 1, ) %>% group_by(origin_state) %>% summarise(prop_of_award = mean(suggest_is_award), sum = n()) %>% arrange(sum)
 
 #Visualize it with a line showing the overall rate at which awarded lanes use the suggested rate
 ggplot(percent_suggest_of_award %>% filter(sum > 30) ) +
